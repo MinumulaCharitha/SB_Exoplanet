@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exoplanet Habitability Predictor</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+<div class="container my-5">
+
+    <h1 class="text-center mb-4">Exoplanet Habitability Predictor</h1>
+
+    <!-- Prediction Form -->
+    <div class="card mb-4 p-4 shadow-sm">
+        <h5>Enter Planetary Parameters</h5>
+
+        <form id="predictForm">
+            <div class="row g-3">
+
+                <div class="col-md-4">
+                    <label class="form-label">Planet Name</label>
+                    <input type="text" class="form-control" id="P_NAME" required>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Semi-Major Axis Error Min</label>
+                    <input type="number" step="any" class="form-control" id="P_SEMI_MAJOR_AXIS_ERROR_MIN" required>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Star Temperature</label>
+                    <input type="number" step="any" class="form-control" id="S_TEMPERATURE" required>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Star Mass</label>
+                    <input type="number" step="any" class="form-control" id="S_MASS" required>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Star Age Limit</label>
+                    <input type="number" step="any" class="form-control" id="S_AGE_LIMIT" required>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Star Luminosity (log)</label>
+                    <input type="number" step="any" class="form-control" id="S_LOG_LUM" required>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Select Model</label>
+                    <select class="form-select" id="model">
+                        <option value="xgb">XGBoost (Explainable)</option>
+                        <option value="svm">SVM</option>
+                    </select>
+                </div>
+
+            </div>
+
+            <button type="submit" class="btn btn-primary mt-3">Predict Habitability</button>
+        </form>
+    </div>
+
+    <!-- Prediction Result -->
+    <div id="predictionResult" class="card mb-4 p-4 shadow-sm d-none">
+        <h5>Prediction Result</h5>
+        <p><strong>Predicted Class:</strong> <span id="predClass"></span></p>
+        <p><strong>Prediction Probabilities:</strong> <span id="predProba"></span></p>
+        <p><strong>Habitability Score:</strong> <span id="habitabilityScore"></span></p>
+    </div>
+
+    <!-- SHAP Explanation -->
+    <div id="shapSection" class="card mb-4 p-4 shadow-sm d-none">
+        <h5>Why this prediction? (Explainable AI)</h5>
+        <canvas id="shapChart"></canvas>
+    </div>
+
+    <!-- Ranking Table -->
+    <div class="card mb-4 p-4 shadow-sm">
+        <h5>All Predictions Ranking</h5>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr>
+                    <th>ID</th>
+                    <th>Planet Name</th>
+                    <th>Predicted Class</th>
+                    <th>Model Used</th>
+                </tr>
+            </thead>
+            <tbody id="rankingTable"></tbody>
+        </table>
+    </div>
+
+</div>
+
+<script>
+let shapChart = null;
+const API_KEY = "mysecretkey";
+
+function renderShapChart(shapData) {
+    const labels = Object.keys(shapData);
+    const values = Object.values(shapData);
+
+    const ctx = document.getElementById("shapChart").getContext("2d");
+
+    if (shapChart) shapChart.destroy();
+
+    shapChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: labels,
+            datasets: [{
+                data: values,
+                backgroundColor: values.map(v =>
+                    v >= 0 ? "rgba(75,192,192,0.7)" : "rgba(255,99,132,0.7)"
+                )
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { title: { display: true, text: "Impact on Prediction" } }
+            }
+        }
+    });
+}
+
+// Load prediction history
+function loadPredictions() {
+    fetch("/predictions", { headers: { "x-api-key": API_KEY }})
+        .then(res => res.json())
+        .then(data => {
+            const table = document.getElementById("rankingTable");
+            table.innerHTML = "";
+            data.predictions.forEach(p => {
+                table.innerHTML += `
+                    <tr>
+                        <td>${p.id}</td>
+                        <td>${p.planet_name}</td>
+                        <td>${p.predicted_class}</td>
+                        <td>${p.model_used}</td>
+                    </tr>`;
+            });
+        });
+}
+
+loadPredictions();
+
+document.getElementById("predictForm").addEventListener("submit", function(e) {
+    e.preventDefault();
+
+    const payload = {
+        P_NAME: document.getElementById("P_NAME").value,
+        P_SEMI_MAJOR_AXIS_ERROR_MIN: parseFloat(document.getElementById("P_SEMI_MAJOR_AXIS_ERROR_MIN").value),
+        S_TEMPERATURE: parseFloat(document.getElementById("S_TEMPERATURE").value),
+        S_MASS: parseFloat(document.getElementById("S_MASS").value),
+        S_AGE_LIMIT: parseFloat(document.getElementById("S_AGE_LIMIT").value),
+        S_LOG_LUM: parseFloat(document.getElementById("S_LOG_LUM").value),
+        model: document.getElementById("model").value
+    };
+
+    fetch("/predict_habitability", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        document.getElementById("predictionResult").classList.remove("d-none");
+        document.getElementById("predClass").textContent = data.predicted_class;
+        document.getElementById("predProba").textContent = JSON.stringify(data.prediction_proba);
+        document.getElementById("habitabilityScore").textContent =
+            data.predicted_class === 0 ? "Low" :
+            data.predicted_class === 1 ? "Medium" : "High";
+
+        if (data.shap_explanation && Object.keys(data.shap_explanation).length > 0) {
+            document.getElementById("shapSection").classList.remove("d-none");
+            renderShapChart(data.shap_explanation);
+        } else {
+            document.getElementById("shapSection").classList.add("d-none");
+        }
+
+        loadPredictions();
+    });
+});
+</script>
+
+</body>
+</html>
